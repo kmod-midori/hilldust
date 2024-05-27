@@ -53,10 +53,22 @@ print('Network configured.')
 
 print("Remote", c.ip_ipv4.ip)
 
+failure_count = 0
+
 try:
     while True:
         time.sleep(30)
-        subprocess.call(["ping", "-c", "2", str(c.gateway_ipv4)])
+        result = subprocess.call(["ping", "-c", "2", str(c.gateway_ipv4)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if result == 0:
+            failure_count = 0
+        else:
+            failure_count += 1
+            print('Ping failed. Count:', failure_count)
+        
+        if failure_count >= 5:
+            print('Ping failed 5 times. Stopping...')
+            break
+
 except KeyboardInterrupt:
     pass
 

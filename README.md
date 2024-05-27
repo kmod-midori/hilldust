@@ -1,21 +1,17 @@
 # Hilldust
-(UNOFFICIAL) Yet another implementation of *Hillstone™ Secure Connect VPN Client* for Linux
-
-and for macOS later.
+(UNOFFICIAL) Yet another implementation of *Hillstone™ Secure Connect VPN Client* for Linux, now with in-kernel IPSec SA!
 
 ## Usage
 ```
-./hilldust.py vpn.yourdomain.com:12345 username password
+hilldust.py /path/to/config.json
 ```
-As `vpn.yourdomain.com:12345` is your VPN provider's address.
 
 ## Notes
 For now, it is only a proof-of-concept and may be not available for all the users,
-because it only supports auth: `HMAC-SHA1-96`, crypto: `3DES-CBC`.
+because it only supports auth: `hmac-md5-96`, crypto: `aes128_cbc`.
 
 ## Dependencies
 - Python 3
-- scapy (Python module)
 - cryptography (Python module)
 - iproute2
 

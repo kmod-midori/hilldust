@@ -1,58 +1,76 @@
 import hillstone
 
-import os
-import fcntl
-import struct
 import subprocess
+import binascii
 
-route_table_bak = b''
-nameserver_bak = b''
-tun = None
+del_commands = []
 
-def set_network(c:hillstone.ClientCore):
-    global tun, route_table_bak, nameserver_bak
-    TUNSETIFF = 0x400454ca
-    IFF_TUN = 0x0001
-    IFF_NO_PI = 0x1000
+def setup_network_internal(c: hillstone.ClientCore, local_ip: str, local_port: int):
+    global del_commands
 
-    tun = open('/dev/net/tun', 'r+b', buffering=0)
-    ifr = struct.pack('16sH', b'', IFF_TUN | IFF_NO_PI)
-    ifr = fcntl.ioctl(tun, TUNSETIFF, ifr)
-    ifr = ifr[:ifr.index(b'\0')].decode('ascii')
+    del_commands.append(["ip", "xfrm", "state", "deleteall"])
+    subprocess.check_call([
+        "ip", "xfrm", "state", "add",
+        "src", local_ip, "dst", str(c.server_host),
+        "proto", "esp", "spi", hex(c.ipsec_param.out_spi), "reqid", "256", "mode", "tunnel", "if_id", "233",
+        "auth-trunc", "hmac(md5)", f"0x{binascii.hexlify(c.ipsec_param.out_auth_key).decode()}", "96",
+        "enc", "cbc(aes)", f"0x{binascii.hexlify(c.ipsec_param.out_crypt_key).decode()}",
+        "encap", "espinudp", str(local_port), str(c.server_udp_port), "0.0.0.0"
+    ])
 
-    subprocess.check_call('ip address add dev '+ifr+' '+str(c.ip_ipv4.ip), shell=True)
-    subprocess.check_call('ip link set dev '+ifr+' up', shell=True)
-    route_table_bak = subprocess.check_output('ip route save table main', shell=True)
-    server_gateway = subprocess.check_output('ip route get fibmatch '+c.server_host, shell=True)
+    subprocess.check_call([
+        "ip", "xfrm", "state", "add",
+        "src", str(c.server_host), "dst", local_ip,
+        "proto", "esp", "spi", hex(c.ipsec_param.in_spi), "reqid", "256", "mode", "tunnel", "if_id", "233",
+        "auth-trunc", "hmac(md5)", f"0x{binascii.hexlify(c.ipsec_param.in_auth_key).decode()}", "96",
+        "enc", "cbc(aes)", f"0x{binascii.hexlify(c.ipsec_param.in_crypt_key).decode()}",
+        "encap", "espinudp", str(c.server_udp_port), str(local_port), "0.0.0.0"
+    ])
+    
+
+    del_commands.append(["ip", "xfrm", "policy", "deleteall"])
+    subprocess.check_call([
+        "ip", "xfrm", "policy", "add",
+        "src", "0.0.0.0/0", "dst", "0.0.0.0/0", "dir", "out",
+        "tmpl",
+        "dst", str(c.server_host),
+        "proto", "esp", "mode", "tunnel", "reqid", "256",
+        "if_id", "233"
+    ])
+    subprocess.check_call([
+        "ip", "xfrm", "policy", "add",
+        "src", "0.0.0.0/0", "dst", "0.0.0.0/0", "dir", "in",
+        "tmpl",
+        "src", str(c.server_host), 
+        "proto", "esp", "mode", "tunnel", "reqid", "256",
+        "if_id", "233"
+    ])
+    
+
+    del_commands.append(["ip", "link", "delete", "ipsec0"])
+    subprocess.check_call([
+        "ip", "link", "add", "ipsec0", "type", "xfrm", "dev", "lo", "if_id", "233"
+    ])
+    subprocess.check_call([
+        "ip", "addr", "add", "dev", "ipsec0", str(c.ip_ipv4)
+    ])
+    subprocess.check_call([
+        "ip", "link", "set", "ipsec0", "up"
+    ])
+    
+
+    subprocess.check_call(["ip", "route", "add", "10.240.0.0/16", "via", str(c.gateway_ipv4)])
+    subprocess.check_call(["ip", "route", "add", "10.255.0.0/16", "via", str(c.gateway_ipv4)])
+
+
+def set_network(c: hillstone.ClientCore, local_ip: str, local_port: int):
     try:
-        server_gateway = server_gateway[server_gateway.index(b' via'):]
-    except ValueError:
-        server_gateway = server_gateway[server_gateway.index(b' dev'):]
-    subprocess.run('ip route add '+c.server_host+server_gateway.decode('ascii'), check=False, shell=True)
-    subprocess.check_call('ip route add '+str(c.gateway_ipv4)+' dev '+ifr, shell=True)
-    subprocess.check_call('ip route add '+str(c.ip_ipv4.network)+' via '+str(c.gateway_ipv4), shell=True)
-    subprocess.check_call('ip route replace default metric 0 via '+str(c.gateway_ipv4), shell=True)
-    
-    with open('/etc/resolv.conf', 'rb') as f:
-        nameserver_bak = f.read()
-    
-    with open('/etc/resolv.conf', 'wb') as f:
-        buf = ''
-        for dns in c.dns_ipv4:
-            buf += 'nameserver ' + str(dns) + '\n'
-        f.write(buf.encode('ascii'))
-    
-def restore_network(c:hillstone.ClientCore):
-    from tempfile import NamedTemporaryFile
-    with NamedTemporaryFile(buffering=0) as f:
-        f.write(route_table_bak)
-        subprocess.check_call('ip route flush table main', shell=True)
-        subprocess.check_call('ip route restore < '+f.name, shell=True, stderr=subprocess.DEVNULL)
-    with open('/etc/resolv.conf', 'wb') as f:
-        f.write(nameserver_bak)
+        setup_network_internal(c, local_ip, local_port)
+    except:
+        restore_network(c)
+        raise
 
-def write(datagram:bytes):
-    os.write(tun.fileno(), datagram)
-
-def read():
-    return os.read(tun.fileno(), 8192)
+def restore_network(c: hillstone.ClientCore):
+    global del_commands
+    for cmd in del_commands:
+        subprocess.call(cmd)

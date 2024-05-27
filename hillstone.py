@@ -3,6 +3,7 @@ import ipaddress
 import socket
 import ssl
 import struct
+from typing import Tuple
 
 class AuthError(Exception):
     def __init__(self):
@@ -140,7 +141,7 @@ class Payload(enum.Enum):
     CLIENT_AUTO_CONNECT = 136
 
 
-def Unpack(packet:bytes) -> (MessageType, dict, bool):
+def Unpack(packet:bytes) -> Tuple[MessageType, dict, bool]:
     magic, reply, msg_t, size = struct.unpack('!BBHL', packet[:8])
     if magic == 0x0 and reply == 0 and msg_t == 0 and size == 0:
         return MessageType.NONE, {}, True
@@ -196,7 +197,7 @@ class IPSecParameters(object):
         for _ in range(9):
             self.enlarged_keymat += sha1(self.enlarged_keymat).digest()
         
-        def read_bytes(buf:bytes, size:int) -> (bytes, bytes):
+        def read_bytes(buf:bytes, size:int) -> Tuple[bytes, bytes]:
             return buf[:size], buf[size:]
         buf = self.enlarged_keymat
         self.out_auth_key, buf = read_bytes(buf, auth_size)
@@ -207,7 +208,10 @@ class IPSecParameters(object):
 
 class ClientCore(object):
     def __init__(self):
-        self.socket = ssl.wrap_socket(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
+        context = ssl.SSLContext(ssl.PROTOCOL_TLSv1)
+        context.check_hostname = False
+        context.set_ciphers("DEFAULT@SECLEVEL=0")
+        self.socket = context.wrap_socket(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
         self.client_ver = '1.0.0'
         self.server_host = ''
         self.server_port = -1
@@ -285,11 +289,11 @@ class ClientCore(object):
         msg_id, res, _ = Unpack(self.socket.recv(4096))
         if res[Payload.STATUS] != b'\0\0\0\0':
             raise NewKeyError
-        if res[Payload.ENC_ALG] != b'\0\x03' or res[Payload.AUTH_ALG] != b'\0\x02' or res[Payload.IPCOMP_ALG] != b'\0\0':
+        if res[Payload.ENC_ALG] != b'\0\x0c' or res[Payload.AUTH_ALG] != b'\0\x01' or res[Payload.IPCOMP_ALG] != b'\0\0':
             raise NotSupported
         outbound_spi = int.from_bytes(res[Payload.SPI], byteorder='big')
         # outbound_cpi = int.from_bytes(res[Payload.IPCOMP_CPI], byteorder='big')
-        self.ipsec_param = IPSecParameters(inbound_spi, outbound_spi, key_material, auth_size=0x14, crypt_size=0x18, iv_size=8)
+        self.ipsec_param = IPSecParameters(inbound_spi, outbound_spi, key_material, auth_size=16, crypt_size=16, iv_size=16)
         self.session_id = res[Payload.SESSION_ID]
 
     def logout(self):

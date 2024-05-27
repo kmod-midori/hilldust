@@ -1,29 +1,32 @@
 #!/usr/bin/env python3
 
-import sys, time, subprocess, socket
+import sys, time, subprocess, socket, argparse, json
 import hillstone
 
 if sys.version_info.major == 2:
     exec('print "This program cannot be run in Python 2."')
     exit(1)
 
-if len(sys.argv) != 4:
-    print('Usage:', sys.argv[0], 'ADDRESS:PORT', 'USERNAME', 'PASSWORD')
-    exit(2)
+arg_parser = argparse.ArgumentParser(description='HillDust VPN Client')
+arg_parser.add_argument('config', help='Path to JSON configuration file', type=argparse.FileType('r'))
+args = arg_parser.parse_args()
 
 import os
 if os.getuid() != 0:
     print('Need to be root.')
-    exit(3)
+    exit(1)
 
-target = sys.argv[1]
+config = json.load(args.config)
+args.config.close()
+
+target = config['server']
 delim_index = target.rindex(':')
 host, port = target[:delim_index], target[delim_index+1:]
 
 c = hillstone.ClientCore()
 c.connect(host, int(port))
 print('Connected.')
-c.auth(sys.argv[2], sys.argv[3], '', '')
+c.auth(config['username'], config['password'], '', '')
 print('Authentication completed.')
 c.client_info()
 c.wait_network()
@@ -45,7 +48,7 @@ local_port = local_udp_socket.getsockname()[1]
 print("Local", local_ip, local_port)
 
 import platform_linux
-platform_linux.set_network(c, local_ip, local_port)
+platform_linux.set_network(c, local_ip, local_port, config['routes'])
 print('Network configured.')
 
 print("Remote", c.ip_ipv4.ip)

@@ -5,7 +5,7 @@ import binascii
 
 del_commands = []
 
-def setup_network_internal(c: hillstone.ClientCore, local_ip: str, local_port: int):
+def setup_network_internal(c: hillstone.ClientCore, local_ip: str, local_port: int, routes: list[str]):
     global del_commands
 
     del_commands.append(["ip", "xfrm", "state", "deleteall"])
@@ -57,15 +57,14 @@ def setup_network_internal(c: hillstone.ClientCore, local_ip: str, local_port: i
     subprocess.check_call([
         "ip", "link", "set", "ipsec0", "up"
     ])
-    
 
-    subprocess.check_call(["ip", "route", "add", "10.240.0.0/16", "via", str(c.gateway_ipv4)])
-    subprocess.check_call(["ip", "route", "add", "10.255.0.0/16", "via", str(c.gateway_ipv4)])
+    for route in routes:
+        subprocess.check_call(["ip", "route", "add", route, "via", str(c.gateway_ipv4)])
 
 
-def set_network(c: hillstone.ClientCore, local_ip: str, local_port: int):
+def set_network(c: hillstone.ClientCore, local_ip: str, local_port: int, routes: list[str]):
     try:
-        setup_network_internal(c, local_ip, local_port)
+        setup_network_internal(c, local_ip, local_port, routes)
     except:
         restore_network(c)
         raise

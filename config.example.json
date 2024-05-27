@@ -1,0 +1,10 @@
+{
+    "server": "114.51.4.19:8848",
+    "username": "username",
+    "password": "password123",
+    "routes": [
+       "10.240.0.0/16",
+       "10.255.0.0/16"
+    ]
+ } 
+ 

@@ -135,10 +135,10 @@ class Payload(enum.Enum):
     HOST_CHECK_RESULT_SIZE = 116
     IPCOMP_CPI = 128
     IPCOMP_ALG = 129
-    ALLOW_PWD = 132
-    NEED_SMS_AUTH = 133
+    ALLOW_PWD = 132 # 0x84
+    NEED_SMS_AUTH = 133 # 0x85
     SMS_AUTH_CODE = 134
-    CLIENT_AUTO_CONNECT = 136
+    CLIENT_AUTO_CONNECT = 136 # 0x88
 
 
 def Unpack(packet:bytes) -> Tuple[MessageType, dict, bool]:
@@ -240,6 +240,25 @@ class ClientCore(object):
         m.push_string(Payload.HOST_NAME, host_name)
         self.socket.send(m.finish())
         msg_id, res, _ = Unpack(self.socket.recv(4096))
+
+        if Payload.NEED_SMS_AUTH in res and res[Payload.NEED_SMS_AUTH] == b'\0\0\0\1':
+            m2 = Message(MessageType.SMS_AUTH_REQ)
+            m2.push_int(Payload.NEED_SMS_AUTH, 2, 1)
+            self.socket.send(m2.finish())
+            msg_id, res2, _ = Unpack(self.socket.recv(4096))
+            if res2[Payload.STATUS] != b'\0\0\0\0':
+                raise AuthError
+            
+            sms_code = input("Please input the SMS code: ")
+            m3 = Message(MessageType.SMS_REQ)
+            m3.push_string(Payload.SMS_AUTH_CODE, sms_code)
+            self.socket.send(m3.finish())
+            msg_id, res3, _ = Unpack(self.socket.recv(4096))
+            if res3[Payload.STATUS] != b'\0\0\0\0':
+                raise AuthError
+
+            return
+
         if res[Payload.STATUS] != b'\0\0\0\0':
             raise AuthError
 
